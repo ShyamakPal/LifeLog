@@ -61,212 +61,615 @@
         </div>
         <script>
             // Initialize event listeners when the page loads
-            window.onload = function() {
-                const logInput = document.getElementById('logInput');
-                const logButton = document.getElementById('logButton');
-                const previousLogs = document.getElementById('previousLogs');
-                const successMessage = document.getElementById('successMessage');
-                const toggleLogsButton = document.getElementById('toggleLogs');
-                const chatInput = document.getElementById('chatInput');
-                const sendButton = document.getElementById('sendButton');
-                const chatMessages = document.getElementById('chatMessages');
-                const toggleChatButton = document.getElementById('toggleChat');
-                const chatbotContainer = document.getElementById('chatbotContainer');
-                const aiModelSelect = document.getElementById('aiModel');
+            // Initialize event listeners when the page loads
+window.onload = function() {
+    const logInput = document.getElementById('logInput');
+    const logButton = document.getElementById('logButton');
+    const previousLogs = document.getElementById('previousLogs');
+    const successMessage = document.getElementById('successMessage');
+    const toggleLogsButton = document.getElementById('toggleLogs');
+    const chatInput = document.getElementById('chatInput');
+    const sendButton = document.getElementById('sendButton');
+    const chatMessages = document.getElementById('chatMessages');
+    const toggleChatButton = document.getElementById('toggleChat');
+    const chatbotContainer = document.getElementById('chatbotContainer');
+    const aiModelSelect = document.getElementById('aiModel');
+    
+    let logsVisible = true;
+    let chatVisible = true;
+    
+    // Load existing logs
+    displayLogs();
+    
+    // Log button event listener
+    logButton.addEventListener('click', function() {
+        const logText = logInput.value.trim();
+        
+        if (logText === '') {
+            alert('Please enter a log entry before saving.');
+            return;
+        }
+        
+        // Save the log entry
+        saveLog(logText);
+        
+        // Clear the input
+        logInput.value = '';
+        
+        // Show success message
+        successMessage.style.display = 'block';
+        setTimeout(function() {
+            successMessage.style.display = 'none';
+        }, 3000);
+        
+        // Refresh the displayed logs
+        displayLogs();
+    });
+    
+    // Toggle logs visibility
+    toggleLogsButton.addEventListener('click', function() {
+        logsVisible = !logsVisible;
+        previousLogs.style.display = logsVisible ? 'block' : 'none';
+    });
+    
+    // Toggle chatbot visibility
+    toggleChatButton.addEventListener('click', function() {
+        chatVisible = !chatVisible;
+        chatbotContainer.style.display = chatVisible ? 'block' : 'none';
+    });
+    
+    // Send button event listener
+    sendButton.addEventListener('click', function() {
+        sendChatMessage();
+    });
+    
+    // Chat input keypress event listener (for Enter key)
+    chatInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            sendChatMessage();
+        }
+    });
+    
+    // Function to send chat message to AI
+    function sendChatMessage() {
+        const message = chatInput.value.trim();
+        if (message === '') return;
+        
+        // Display user message
+        appendMessage('user', message);
+        
+        // Clear input
+        chatInput.value = '';
+        
+        // Get logs for context
+        let logs = [];
+        try {
+            logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+        } catch (e) {
+            logs = [];
+        }
+        
+        // Show loading indicator
+        const loadingMsgId = 'loading-' + Date.now();
+        appendMessage('bot', 'Thinking...', loadingMsgId);
+        
+        // Check if there are any logs before sending to the API
+        if (logs.length === 0) {
+            // Remove loading message
+            document.getElementById(loadingMsgId)?.remove();
+            
+            // Display message about no logs
+            appendMessage('bot', 'I don\'t have any log entries to analyze yet. Please add some daily logs first so I can provide insights about your life.');
+            return;
+        }
+        
+        // Try to send to backend API with error handling
+        try {
+            fetch('https://by36wz5945.execute-api.us-west-2.amazonaws.com/prod/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message: message,
+                    logs: logs,
+                    model: "bedrock",
+                    bucket: "lifelog-uci-2"
+                }),
+                // Add timeout to fetch request
+                signal: AbortSignal.timeout(15000) // 15 second timeout
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Remove loading message
+                document.getElementById(loadingMsgId)?.remove();
                 
-                let logsVisible = true;
-                let chatVisible = true;
+                // Check if response contains actual content
+                if (data && data.response) {
+                    // Display bot response
+                    appendMessage('bot', data.response);
+                } else {
+                    throw new Error('Empty or invalid response from server');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                handleApiError(loadingMsgId);
+            });
+        } catch (error) {
+            console.error('Fetch execution error:', error);
+            handleApiError(loadingMsgId);
+        }
+    }
+    
+    // Handle API errors consistently
+    // Replace the handleApiError function with this enhanced version
+
+// Handle API errors with more specific error messages
+function handleApiError(loadingMsgId) {
+    // Remove loading message if it exists
+    document.getElementById(loadingMsgId)?.remove();
+    
+    // Get logs for context
+    let logs = [];
+    try {
+        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+    } catch (e) {
+        logs = [];
+    }
+    
+    // Check online status
+    if (!navigator.onLine) {
+        appendMessage('bot', 'You appear to be offline. Please check your internet connection and try again.', null, 'error-message');
+        return;
+    }
+    
+    // Check if the server might be down (based on recent failed attempts)
+    const now = Date.now();
+    let recentFailures = [];
+    try {
+        recentFailures = JSON.parse(localStorage.getItem('apiFailures')) || [];
+        // Clean up old failures (older than 5 minutes)
+        recentFailures = recentFailures.filter(time => now - time < 5 * 60 * 1000);
+    } catch (e) {
+        recentFailures = [];
+    }
+    
+    // Add current failure
+    recentFailures.push(now);
+    localStorage.setItem('apiFailures', JSON.stringify(recentFailures));
+    
+    // If we have multiple failures in the last 5 minutes, likely server issue
+    if (recentFailures.length >= 3) {
+        appendMessage('bot', 'The AI service appears to be experiencing issues right now. Please try again later.', null, 'error-message');
+        
+        // Add a retry button
+        const retryButton = document.createElement('button');
+        retryButton.textContent = 'Try Again';
+        retryButton.style.marginTop = '10px';
+        retryButton.style.padding = '5px 10px';
+        retryButton.style.backgroundColor = '#2196f3';
+        retryButton.style.color = 'white';
+        retryButton.style.border = 'none';
+        retryButton.style.borderRadius = '4px';
+        retryButton.style.cursor = 'pointer';
+        
+        // Get the last message
+        const lastMessage = chatMessages.lastChild;
+        lastMessage.appendChild(document.createElement('br'));
+        lastMessage.appendChild(retryButton);
+        
+        // Retry functionality
+        retryButton.addEventListener('click', function() {
+            // Get the last user message
+            const userMessages = document.querySelectorAll('.user-message');
+            if (userMessages.length > 0) {
+                const lastUserMessage = userMessages[userMessages.length - 1].textContent;
                 
-                // Load existing logs
+                // Remove the error message
+                lastMessage.remove();
+                
+                // Show new loading indicator
+                const newLoadingMsgId = 'loading-' + Date.now();
+                appendMessage('bot', 'Trying again...', newLoadingMsgId, 'loading-indicator');
+                
+                // Make a new request
+                makeApiRequest(lastUserMessage, logs, newLoadingMsgId, 0);
+            }
+        });
+        
+        return;
+    }
+    
+    // Provide a fallback response based on available logs
+    if (logs.length > 0) {
+        // Create a more helpful error message with log information
+        let recentLogDates = logs.slice(0, 3).map(log => new Date(log.date).toLocaleDateString());
+        
+        const fallbackResponse = `I'm having trouble connecting to the AI service right now. 
+            You have ${logs.length} log ${logs.length === 1 ? 'entry' : 'entries'}, with the most recent from ${recentLogDates[0]}.
+            Please try again in a few moments.`;
+        
+        appendMessage('bot', fallbackResponse, null, 'error-message');
+    } else {
+        appendMessage('bot', 'I\'m having trouble connecting to the AI service. Please check your internet connection and try again later.', null, 'error-message');
+    }
+    
+    // Add a fallback feature to search logs locally
+    if (logs.length > 0) {
+        // Add a message suggesting local search
+        const searchMessage = document.createElement('div');
+        searchMessage.className = 'bot-message';
+        searchMessage.innerHTML = `
+            In the meantime, you can search your logs directly:<br>
+            <input type="text" id="localSearchInput" placeholder="Search your logs..." style="margin-top: 10px; width: 70%; padding: 5px;">
+            <button id="localSearchButton" style="margin-left: 5px; padding: 5px 10px; background-color: #2196f3; color: white; border: none; border-radius: 4px;">Search</button>
+        `;
+        chatMessages.appendChild(searchMessage);
+        
+        // Add search functionality
+        document.getElementById('localSearchButton').addEventListener('click', function() {
+            const searchTerm = document.getElementById('localSearchInput').value.toLowerCase().trim();
+            if (searchTerm === '') return;
+            
+            // Search logs
+            const results = logs.filter(log => 
+                log.text.toLowerCase().includes(searchTerm)
+            );
+            
+            // Display results
+            if (results.length > 0) {
+                let resultsText = `Found ${results.length} ${results.length === 1 ? 'entry' : 'entries'} containing "${searchTerm}":\n\n`;
+                
+                results.forEach(log => {
+                    const date = new Date(log.date).toLocaleDateString();
+                    resultsText += `• ${date}: ${log.text.substring(0, 100)}${log.text.length > 100 ? '...' : ''}\n\n`;
+                });
+                
+                appendMessage('bot', resultsText);
+            } else {
+                appendMessage('bot', `No logs found containing "${searchTerm}".`);
+            }
+        });
+        
+        // Add keypress event for Enter key
+        document.getElementById('localSearchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('localSearchButton').click();
+            }
+        });
+    }
+}
+    
+    // Function to append message to chat
+    function appendMessage(sender, text, id = null) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
+        if (id) messageDiv.id = id;
+        messageDiv.textContent = text;
+        chatMessages.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Function to save log to localStorage
+    function saveLog(text) {
+        const now = new Date();
+        const logEntry = {
+            date: now.toISOString(),
+            text: text
+        };
+        
+        // Get existing logs
+        let logs = [];
+        try {
+            logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+        } catch (e) {
+            logs = [];
+        }
+        
+        // Add new log at the beginning
+        logs.unshift(logEntry);
+        
+        // Save to localStorage
+        localStorage.setItem('lifeLogs', JSON.stringify(logs));
+    }
+    
+    // Add this code to your existing JavaScript, inside the window.onload function
+
+// Add character counter for log input
+const charCounterDiv = document.createElement('div');
+charCounterDiv.className = 'char-counter';
+charCounterDiv.textContent = '0 characters';
+logInput.parentNode.insertBefore(charCounterDiv, logButton);
+
+// Update character count on input
+logInput.addEventListener('input', function() {
+    const count = logInput.value.length;
+    charCounterDiv.textContent = count + ' characters';
+    
+    // Add warning classes for length
+    if (count > 200) {
+        charCounterDiv.className = 'char-counter warning';
+    } else if (count > 500) {
+        charCounterDiv.className = 'char-counter limit';
+    } else {
+        charCounterDiv.className = 'char-counter';
+    }
+});
+
+// Add clear all logs functionality
+const controlsDiv = document.querySelector('.logs-section .controls');
+const clearLogsButton = document.createElement('button');
+clearLogsButton.className = 'clear-logs';
+clearLogsButton.textContent = 'Clear All Logs';
+clearLogsButton.style.marginLeft = '10px';
+clearLogsButton.style.backgroundColor = '#f44336';
+clearLogsButton.style.color = 'white';
+controlsDiv.appendChild(clearLogsButton);
+
+// Clear logs button event listener
+clearLogsButton.addEventListener('click', function() {
+    if (confirm('Are you sure you want to delete all logs? This action cannot be undone.')) {
+        localStorage.removeItem('lifeLogs');
+        displayLogs();
+        appendMessage('bot', 'All logs have been cleared.');
+    }
+});
+
+// Add export logs functionality
+const exportLogsButton = document.createElement('button');
+exportLogsButton.className = 'export-logs';
+exportLogsButton.textContent = 'Export Logs';
+exportLogsButton.style.marginLeft = '10px';
+exportLogsButton.style.backgroundColor = '#4caf50';
+exportLogsButton.style.color = 'white';
+controlsDiv.appendChild(exportLogsButton);
+
+// Export logs button event listener
+exportLogsButton.addEventListener('click', function() {
+    let logs = [];
+    try {
+        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+    } catch (e) {
+        logs = [];
+    }
+    
+    if (logs.length === 0) {
+        alert('No logs to export.');
+        return;
+    }
+    
+    // Format logs for export
+    let exportContent = "Date,Log Entry\n";
+    logs.forEach(log => {
+        const date = new Date(log.date).toLocaleString();
+        // Escape quotes and wrap in quotes to handle commas in the text
+        const escapedText = '"' + log.text.replace(/"/g, '""') + '"';
+        exportContent += `${date},${escapedText}\n`;
+    });
+    
+    // Create download link
+    const blob = new Blob([exportContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'life_logs_' + new Date().toISOString().split('T')[0] + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+});
+
+// Add ability to delete individual logs
+function displayLogs() {
+    // Get logs from localStorage
+    let logs = [];
+    try {
+        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+    } catch (e) {
+        logs = [];
+    }
+    
+    // Clear the container
+    previousLogs.innerHTML = '';
+    
+    if (logs.length === 0) {
+        previousLogs.innerHTML = '<div class="no-logs">No log entries yet. Start logging to see your entries here.</div>';
+        return;
+    }
+    
+    // Display each log
+    logs.forEach((log, index) => {
+        const logDate = new Date(log.date);
+        const formattedDate = logDate.toLocaleDateString() + ' ' + logDate.toLocaleTimeString();
+        
+        const logElement = document.createElement('div');
+        logElement.className = 'log-entry';
+        
+        const dateElement = document.createElement('div');
+        dateElement.className = 'log-date';
+        dateElement.textContent = formattedDate;
+        
+        const textElement = document.createElement('div');
+        textElement.className = 'log-text';
+        textElement.textContent = log.text;
+        
+        // Add delete button for each log
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = '×';
+        deleteButton.className = 'delete-log';
+        deleteButton.title = 'Delete this log entry';
+        deleteButton.style.float = 'right';
+        deleteButton.style.backgroundColor = '#f44336';
+        deleteButton.style.color = 'white';
+        deleteButton.style.border = 'none';
+        deleteButton.style.borderRadius = '50%';
+        deleteButton.style.width = '24px';
+        deleteButton.style.height = '24px';
+        deleteButton.style.lineHeight = '24px';
+        deleteButton.style.textAlign = 'center';
+        deleteButton.style.cursor = 'pointer';
+        
+        // Add edit button for each log
+        const editButton = document.createElement('button');
+        editButton.textContent = '✎';
+        editButton.className = 'edit-log';
+        editButton.title = 'Edit this log entry';
+        editButton.style.float = 'right';
+        editButton.style.backgroundColor = '#2196f3';
+        editButton.style.color = 'white';
+        editButton.style.border = 'none';
+        editButton.style.borderRadius = '50%';
+        editButton.style.width = '24px';
+        editButton.style.height = '24px';
+        editButton.style.lineHeight = '24px';
+        editButton.style.textAlign = 'center';
+        editButton.style.cursor = 'pointer';
+        editButton.style.marginRight = '5px';
+        
+        // Delete log event listener
+        deleteButton.addEventListener('click', function() {
+            if (confirm('Are you sure you want to delete this log entry?')) {
+                logs.splice(index, 1);
+                localStorage.setItem('lifeLogs', JSON.stringify(logs));
                 displayLogs();
-                
-                // Log button event listener
-                logButton.addEventListener('click', function() {
-                    const logText = logInput.value.trim();
-                    
-                    if (logText === '') {
-                        alert('Please enter a log entry before saving.');
-                        return;
-                    }
-                    
-                    // Save the log entry
-                    saveLog(logText);
-                    
-                    // Clear the input
-                    logInput.value = '';
-                    
-                    // Show success message
-                    successMessage.style.display = 'block';
-                    setTimeout(function() {
-                        successMessage.style.display = 'none';
-                    }, 3000);
-                    
-                    // Refresh the displayed logs
-                    displayLogs();
-                });
-                
-                // Toggle logs visibility
-                toggleLogsButton.addEventListener('click', function() {
-                    logsVisible = !logsVisible;
-                    previousLogs.style.display = logsVisible ? 'block' : 'none';
-                });
-                
-                // Toggle chatbot visibility
-                toggleChatButton.addEventListener('click', function() {
-                    chatVisible = !chatVisible;
-                    chatbotContainer.style.display = chatVisible ? 'block' : 'none';
-                });
-                
-                // Send button event listener
-                sendButton.addEventListener('click', function() {
-                    sendChatMessage();
-                });
-                
-                // Chat input keypress event listener (for Enter key)
-                chatInput.addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
-                        sendChatMessage();
-                    }
-                });
-                
-                // Function to send chat message to AI
-                function sendChatMessage() {
-                    const message = chatInput.value.trim();
-                    if (message === '') return;
-                    
-                    // Display user message
-                    appendMessage('user', message);
-                    
-                    // Clear input
-                    chatInput.value = '';
-                    
-                    // Get selected AI model (always bedrock now)
-                    const selectedModel = "bedrock";
-                    
-                    // Get logs for context
-                    let logs = [];
-                    try {
-                        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
-                    } catch (e) {
-                        logs = [];
-                    }
-                    
-                    // Show loading indicator
-                    const loadingMsgId = 'loading-' + Date.now();
-                    appendMessage('bot', 'Thinking...', loadingMsgId);
-                    
-                    // Send to backend API
-                    fetch('https://by36wz5945.execute-api.us-west-2.amazonaws.com/prod/chat', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            message: message,
-                            logs: logs,
-                            model: selectedModel,
-                            bucket: "lifelog-uci-2" // Add bucket name explicitly
-                        })
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Network response was not ok: ' + response.status);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        // Remove loading message
-                        document.getElementById(loadingMsgId)?.remove();
-                        
-                        // Display bot response
-                        appendMessage('bot', data.response);
-                    })
-                    .catch(error => {
-                        // Remove loading message
-                        document.getElementById(loadingMsgId)?.remove();
-                        
-                        // Display error message
-                        appendMessage('bot', 'Sorry, there was an error processing your request. Please try again later.');
-                        console.error('Error:', error);
-                    });
-                }
-                
-                // Function to append message to chat
-                function appendMessage(sender, text, id = null) {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
-                    if (id) messageDiv.id = id;
-                    messageDiv.textContent = text;
-                    chatMessages.appendChild(messageDiv);
-                    
-                    // Scroll to bottom
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                }
-                
-                // Function to save log to localStorage
-                function saveLog(text) {
-                    const now = new Date();
-                    const logEntry = {
-                        date: now.toISOString(),
-                        text: text
-                    };
-                    
-                    // Get existing logs
-                    let logs = [];
-                    try {
-                        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
-                    } catch (e) {
-                        logs = [];
-                    }
-                    
-                    // Add new log at the beginning
-                    logs.unshift(logEntry);
-                    
-                    // Save to localStorage
-                    localStorage.setItem('lifeLogs', JSON.stringify(logs));
-                }
-                
-                // Function to display logs from localStorage
-                function displayLogs() {
-                    // Get logs from localStorage
-                    let logs = [];
-                    try {
-                        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
-                    } catch (e) {
-                        logs = [];
-                    }
-                    
-                    // Clear the container
-                    previousLogs.innerHTML = '';
-                    
-                    if (logs.length === 0) {
-                        previousLogs.innerHTML = '<div class="no-logs">No log entries yet. Start logging to see your entries here.</div>';
-                        return;
-                    }
-                    
-                    // Display each log
-                    logs.forEach(log => {
-                        const logDate = new Date(log.date);
-                        const formattedDate = logDate.toLocaleDateString() + ' ' + logDate.toLocaleTimeString();
-                        
-                        const logElement = document.createElement('div');
-                        logElement.className = 'log-entry';
-                        
-                        const dateElement = document.createElement('div');
-                        dateElement.className = 'log-date';
-                        dateElement.textContent = formattedDate;
-                        
-                        const textElement = document.createElement('div');
-                        textElement.className = 'log-text';
-                        textElement.textContent = log.text;
-                        
-                        logElement.appendChild(dateElement);
-                        logElement.appendChild(textElement);
-                        
-                        previousLogs.appendChild(logElement);
-                    });
-                }
-            };
+            }
+        });
+        
+        // Edit log event listener
+        editButton.addEventListener('click', function() {
+            const newText = prompt('Edit log entry:', log.text);
+            if (newText !== null && newText.trim() !== '') {
+                logs[index].text = newText.trim();
+                localStorage.setItem('lifeLogs', JSON.stringify(logs));
+                displayLogs();
+            }
+        });
+        
+        logElement.appendChild(dateElement);
+        logElement.appendChild(deleteButton);
+        logElement.appendChild(editButton);
+        logElement.appendChild(textElement);
+        
+        previousLogs.appendChild(logElement);
+    });
+}
+
+// Modify sendChatMessage to include retry functionality
+function sendChatMessage() {
+    const message = chatInput.value.trim();
+    if (message === '') return;
+    
+    // Display user message
+    appendMessage('user', message);
+    
+    // Clear input
+    chatInput.value = '';
+    
+    // Get logs for context
+    let logs = [];
+    try {
+        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+    } catch (e) {
+        logs = [];
+    }
+    
+    // Show loading indicator
+    const loadingMsgId = 'loading-' + Date.now();
+    appendMessage('bot', 'Thinking...', loadingMsgId, 'loading-indicator');
+    
+    // Check if there are any logs before sending to the API
+    if (logs.length === 0) {
+        // Remove loading message
+        document.getElementById(loadingMsgId)?.remove();
+        
+        // Display message about no logs
+        appendMessage('bot', 'I don\'t have any log entries to analyze yet. Please add some daily logs first so I can provide insights about your life.');
+        return;
+    }
+    
+    // Send to backend API with retry functionality
+    makeApiRequest(message, logs, loadingMsgId, 0);
+}
+
+// Separate API request function with retry capability
+function makeApiRequest(message, logs, loadingMsgId, retryCount) {
+    const maxRetries = 2;
+    
+    fetch('https://by36wz5945.execute-api.us-west-2.amazonaws.com/prod/chat', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            message: message,
+            logs: logs,
+            model: "bedrock",
+            bucket: "lifelog-uci-2"
+        }),
+        signal: AbortSignal.timeout(15000) // 15 second timeout
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Remove loading message
+        document.getElementById(loadingMsgId)?.remove();
+        
+        // Check if response contains actual content
+        if (data && data.response) {
+            // Display bot response
+            appendMessage('bot', data.response);
+        } else {
+            throw new Error('Empty or invalid response from server');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        
+        if (retryCount < maxRetries) {
+            // Update loading message
+            const loadingMsg = document.getElementById(loadingMsgId);
+            if (loadingMsg) {
+                loadingMsg.textContent = `Connection issue. Retrying (${retryCount + 1}/${maxRetries})...`;
+            }
+            
+            // Retry with exponential backoff
+            setTimeout(() => {
+                makeApiRequest(message, logs, loadingMsgId, retryCount + 1);
+            }, 1000 * Math.pow(2, retryCount));
+        } else {
+            handleApiError(loadingMsgId);
+        }
+    });
+}
+
+// Modified appendMessage function to support additional classes
+function appendMessage(sender, text, id = null, additionalClass = null) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
+    if (additionalClass) {
+        messageDiv.classList.add(additionalClass);
+    }
+    if (id) messageDiv.id = id;
+    messageDiv.textContent = text;
+    chatMessages.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+    
+};
         </script>
     </body>
 </html>
