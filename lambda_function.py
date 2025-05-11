@@ -114,7 +114,7 @@ def query_bedrock(user_message, log_context):
         mention that in your response.
         """
         
-        # Model parameters for Claude
+        # Update to use Claude 3.7 Sonnet
         model_params = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 1000,
@@ -124,11 +124,29 @@ def query_bedrock(user_message, log_context):
             ]
         }
         
-        # Call Bedrock Claude model
-        response = bedrock_runtime.invoke_model(
-            modelId="anthropic.claude-3-sonnet-20240229-v1:0",  # Use the latest available Claude model
-            body=json.dumps(model_params)
-        )
+        # Try to use Claude 3.7 Sonnet first
+        try:
+            response = bedrock_runtime.invoke_model(
+                modelId="anthropic.claude-3-7-sonnet-20250219-v1:0",
+                body=json.dumps(model_params)
+            )
+        except Exception as model_error:
+            logger.warning(f"Failed to use Claude 3.7 Sonnet: {str(model_error)}. Trying Claude 3.5 Haiku...")
+            
+            # Fallback to Claude 3.5 Haiku
+            try:
+                response = bedrock_runtime.invoke_model(
+                    modelId="anthropic.claude-3-5-haiku-20240307-v1:0",
+                    body=json.dumps(model_params)
+                )
+            except Exception as haiku_error:
+                logger.warning(f"Failed to use Claude 3.5 Haiku: {str(haiku_error)}. Trying Claude 3 Sonnet...")
+                
+                # Ultimate fallback to Claude 3 Sonnet
+                response = bedrock_runtime.invoke_model(
+                    modelId="anthropic.claude-3-sonnet-20240229-v1:0",
+                    body=json.dumps(model_params)
+                )
         
         # Parse response
         response_body = json.loads(response.get('body').read())
@@ -136,7 +154,7 @@ def query_bedrock(user_message, log_context):
         
     except Exception as e:
         logger.error(f"Error querying Bedrock: {str(e)}")
-        return f"I'm sorry, I encountered an error when processing your request: {str(e)}"
+        return f"I'm sorry, I encountered an error when processing your request. The AI service might be temporarily unavailable. Please try again in a few moments."
 
 def query_gemini(user_message, log_context):
     """
