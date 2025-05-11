@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Life Log AI Chatbot Infrastructure'
+
+Parameters:
+  GeminiApiKey:
+    Type: String
+    Description: API key for Google Gemini
+    NoEcho: true
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to store website files
+    Default: lifelog-uci
+  ApiStageName:
+    Type: String
+    Description: Name of the API Gateway stage
+    Default: prod
+
+Resources:
+  # IAM Roles
+  ChatProcessorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: '*'
+
+  ProxyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: InvokeChatProcessor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ChatProcessorLambda.Arn
+
+  # Lambda Functions
+  ChatProcessorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lifelog-chat-processor
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt ChatProcessorLambdaRole.Arn
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          GEMINI_API_KEY: !Ref GeminiApiKey
+      Code:
+        ZipFile: |
+          # This is a placeholder. You will upload the actual code separately.
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': '{"response": "Lambda function placeholder. Please upload actual code."}'
+              }
+
+  ProxyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lifelog-api-proxy
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt ProxyLambdaRole.Arn
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          PROCESSOR_LAMBDA_NAME: !Ref ChatProcessorLambda
+      Code:
+        ZipFile: |
+          # This is a placeholder. You will upload the actual code separately.
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': '{"response": "Lambda function placeholder. Please upload actual code."}'
+              }
+
+  # API Gateway
+  ChatbotApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: LifeLogChatbotAPI
+      Description: API for Life Log Chatbot
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ChatResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ChatbotApi
+      ParentId: !GetAtt ChatbotApi.RootResourceId
+      PathPart: chat
+
+  ChatMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ChatbotApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProxyLambda.Arn}/invocations
+
+  ChatOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ChatbotApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: '{}'
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: 'Empty'
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ChatMethod
+      - ChatOptionsMethod
+    Properties:
+      RestApiId: !Ref ChatbotApi
+      StageName: !Ref ApiStageName
+
+  # Lambda permissions
+  ProxyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ProxyLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatbotApi}/*
+
+  # S3 Bucket Configuration
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub '${WebsiteBucket.Arn}/*'
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for the chatbot"
+    Value: !Sub "https://${ChatbotApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/chat"
+  
+  WebsiteURL:
+    Description: "URL of the S3 website"
+    Value: !GetAtt WebsiteBucket.WebsiteURL
+  
+  ChatProcessorLambdaArn:
+    Description: "ARN of the chat processor Lambda function"
+    Value: !GetAtt ChatProcessorLambda.Arn
+  
+  ProxyLambdaArn:
+    Description: "ARN of the proxy Lambda function"
+    Value: !GetAtt ProxyLambda.Arn
