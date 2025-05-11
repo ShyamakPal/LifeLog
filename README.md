@@ -75,10 +75,11 @@ LifeLog/
 └── README.md            # This file, includes backend setup in at the bottom
 ```
 
-## Team Members and Contributions
+## Team Members
 
 ### - Shyamak Pal
 ### - Daniel Pulikkottil
+
 
 ## Contributing
 
