@@ -17,14 +17,17 @@ def lambda_handler(event, context):
     # Log the incoming event with a timestamp
     request_id = context.aws_request_id
     logger.info(f"Request {request_id} started at {datetime.now().isoformat()}")
-    logger.info(f"Incoming event: {json.dumps(event)}")
+    
+    # Log a safe version of the event (without potentially large body contents)
+    safe_event = {k: v for k, v in event.items() if k != 'body'}
+    if 'body' in event:
+        safe_event['body'] = '*** body content present but not logged ***'
+    logger.info(f"Incoming event structure: {json.dumps(safe_event)}")
     
     try:
         # Log environment variables (be careful not to log secrets)
-        logger.info(f"Environment variables: PROCESSOR_LAMBDA_NAME={os.environ.get('PROCESSOR_LAMBDA_NAME', 'NOT_SET')}")
-        
-        # Get the Lambda function name from environment variable
         processor_lambda_name = os.environ.get('PROCESSOR_LAMBDA_NAME')
+        logger.info(f"Environment variables: PROCESSOR_LAMBDA_NAME={processor_lambda_name or 'NOT_SET'}")
         
         # Log if the processor Lambda name is missing
         if not processor_lambda_name:
@@ -61,21 +64,29 @@ def lambda_handler(event, context):
                     # Continue with string body
             
             logger.info(f"Body content type: {type(body).__name__}")
-            # Log body content safely (truncate if too long)
-            body_str = str(body)
-            if len(body_str) > 1000:
-                logger.info(f"Body (truncated): {body_str[:1000]}...")
-            else:
-                logger.info(f"Body: {body_str}")
+            # Log a summary of the body content
+            if isinstance(body, dict):
+                keys = list(body.keys())
+                logger.info(f"Body contains keys: {keys}")
+                if 'message' in body:
+                    msg = body['message']
+                    logger.info(f"User message (truncated): {msg[:50]}..." if len(msg) > 50 else f"User message: {msg}")
+                if 'logs' in body:
+                    logger.info(f"Body contains {len(body['logs'])} logs")
         else:
             logger.warning("No 'body' found in event")
             
         # Prepare the payload for the processor Lambda
         payload = {
-            'body': body,
-            'headers': event.get('headers', {}),
-            'requestContext': event.get('requestContext', {})
+            'body': body
         }
+        
+        # Include important headers and request context
+        if 'headers' in event:
+            payload['headers'] = event['headers']
+        
+        if 'requestContext' in event:
+            payload['requestContext'] = event['requestContext']
         
         logger.info(f"Invoking Lambda function: {processor_lambda_name}")
         
@@ -90,9 +101,39 @@ def lambda_handler(event, context):
             # Log the response metadata
             logger.info(f"Lambda invoke response metadata: {response['ResponseMetadata']}")
             
+            # Check for function errors
+            if 'FunctionError' in response:
+                logger.error(f"Function error: {response.get('FunctionError')}")
+                error_payload = json.loads(response['Payload'].read().decode())
+                logger.error(f"Error payload: {json.dumps(error_payload)}")
+                
+                return {
+                    'statusCode': 500,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({
+                        'error': 'Error in processor lambda',
+                        'details': error_payload
+                    })
+                }
+            
             # Parse the response payload
             response_payload = json.loads(response['Payload'].read().decode())
-            logger.info(f"Processor Lambda response: {json.dumps(response_payload)}")
+            
+            # Log a summary of the response
+            if isinstance(response_payload, dict):
+                status = response_payload.get('statusCode', 'unknown')
+                logger.info(f"Processor Lambda response status: {status}")
+                
+                # Log body structure if present
+                if 'body' in response_payload:
+                    try:
+                        body_content = json.loads(response_payload['body']) if isinstance(response_payload['body'], str) else response_payload['body']
+                        logger.info(f"Response body keys: {list(body_content.keys())}")
+                    except:
+                        logger.info("Could not parse response body as JSON")
             
             # Return the response from the processor Lambda
             return response_payload

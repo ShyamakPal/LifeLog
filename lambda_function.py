@@ -79,6 +79,10 @@ def lambda_handler(event, context):
         
         logger.info(f"User message: {user_message[:100]}..." if len(user_message) > 100 else f"User message: {user_message}")
         
+        # Extract logs if available
+        logs = body.get('logs', [])
+        logger.info(f"Received {len(logs)} log entries")
+        
         # Initialize Bedrock Runtime client
         try:
             logger.info("Initializing Bedrock Runtime client")
@@ -104,6 +108,44 @@ def lambda_handler(event, context):
             model_id = "anthropic.claude-3-sonnet-20240229-v1:0"  # Default model
             logger.warning(f"MODEL_ID not set, using default: {model_id}")
         
+        # Prepare system message with instructions on how to use the logs
+        system_message = """
+        You are a helpful AI assistant for a personal life logging application. 
+        Users will share their daily logs with you and may ask questions about patterns, insights, or summaries.
+        Be supportive, thoughtful, and provide psychological insights when appropriate.
+        
+        When analyzing logs, look for:
+        - Patterns in mood, activities, or behaviors
+        - Potential areas for improvement or growth
+        - Positive trends to encourage
+        - Connections between different aspects of the user's life
+        
+        Keep responses concise, supportive, and focused on helping the user gain insight from their logs.
+        """
+        
+        # Prepare a better prompt that includes context from the logs
+        user_prompt = user_message
+        
+        # Include some context from the logs if available
+        if logs:
+            # Add up to 5 most recent logs as context
+            recent_logs = logs[:5]
+            logs_context = "\n\nHere are my most recent logs:\n"
+            
+            for idx, log in enumerate(recent_logs):
+                date_str = log.get('date', 'Unknown date')
+                try:
+                    # Format the date if it's ISO format
+                    date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    formatted_date = date_obj.strftime('%Y-%m-%d %H:%M')
+                except:
+                    formatted_date = date_str
+                
+                log_text = log.get('text', 'No content')
+                logs_context += f"Log {idx+1} ({formatted_date}): {log_text}\n\n"
+            
+            user_prompt = f"{user_message}\n\n{logs_context}"
+        
         # Prepare request payload for Claude
         try:
             request_payload = {
@@ -111,11 +153,15 @@ def lambda_handler(event, context):
                 "max_tokens": 1000,
                 "messages": [
                     {
+                        "role": "system",
+                        "content": system_message
+                    },
+                    {
                         "role": "user",
                         "content": [
                             {
                                 "type": "text",
-                                "text": user_message
+                                "text": user_prompt
                             }
                         ]
                     }
@@ -123,7 +169,6 @@ def lambda_handler(event, context):
             }
             
             logger.info(f"Request payload prepared for model {model_id}")
-            logger.info(f"Payload: {json.dumps(request_payload)}")
             
             # Invoke Bedrock model
             logger.info(f"Invoking Bedrock model: {model_id}")
@@ -140,7 +185,7 @@ def lambda_handler(event, context):
             ai_message = response_body['content'][0]['text']
             logger.info(f"AI response (first 100 chars): {ai_message[:100]}...")
             
-            # Return success response
+            # Return success response with both 'message' and 'response' keys for backward compatibility
             return {
                 'statusCode': 200,
                 'headers': {
@@ -148,7 +193,8 @@ def lambda_handler(event, context):
                     'Access-Control-Allow-Origin': '*'
                 },
                 'body': json.dumps({
-                    'message': ai_message
+                    'message': ai_message,
+                    'response': ai_message  # Include both keys for compatibility
                 })
             }
             

@@ -211,6 +211,7 @@ window.onload = function() {
     // Replace the handleApiError function with this enhanced version
 
 // Handle API errors with more specific error messages
+// Enhanced error handling function
 function handleApiError(loadingMsgId) {
     // Remove loading message if it exists
     document.getElementById(loadingMsgId)?.remove();
@@ -229,7 +230,7 @@ function handleApiError(loadingMsgId) {
         return;
     }
     
-    // Check if the server might be down (based on recent failed attempts)
+    // Check if the server might be down or having issues
     const now = Date.now();
     let recentFailures = [];
     try {
@@ -344,6 +345,21 @@ function handleApiError(loadingMsgId) {
             }
         });
     }
+}
+
+// Modified appendMessage function to support additional classes
+function appendMessage(sender, text, id = null, additionalClass = null) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
+    if (additionalClass) {
+        messageDiv.classList.add(additionalClass);
+    }
+    if (id) messageDiv.id = id;
+    messageDiv.textContent = text;
+    chatMessages.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
     
     // Function to append message to chat
@@ -668,7 +684,108 @@ function appendMessage(sender, text, id = null, additionalClass = null) {
     // Scroll to bottom
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+// Function to send chat message to AI
+function sendChatMessage() {
+    const message = chatInput.value.trim();
+    if (message === '') return;
     
+    // Display user message
+    appendMessage('user', message);
+    
+    // Clear input
+    chatInput.value = '';
+    
+    // Get logs for context
+    let logs = [];
+    try {
+        logs = JSON.parse(localStorage.getItem('lifeLogs')) || [];
+    } catch (e) {
+        logs = [];
+    }
+    
+    // Show loading indicator
+    const loadingMsgId = 'loading-' + Date.now();
+    appendMessage('bot', 'Thinking...', loadingMsgId);
+    
+    // Check if there are any logs before sending to the API
+    if (logs.length === 0) {
+        // Remove loading message
+        document.getElementById(loadingMsgId)?.remove();
+        
+        // Display message about no logs
+        appendMessage('bot', 'I don\'t have any log entries to analyze yet. Please add some daily logs first so I can provide insights about your life.');
+        return;
+    }
+    
+    // Try to send to backend API with error handling
+    makeApiRequest(message, logs, loadingMsgId, 0);
+}
+
+// Separate API request function with retry capability
+function makeApiRequest(message, logs, loadingMsgId, retryCount) {
+    const maxRetries = 2;
+    
+    // Log the request for debugging
+    console.log('Making API request:', {
+        message: message,
+        logsCount: logs.length,
+        retryCount: retryCount
+    });
+    
+    fetch('https://by36wz5945.execute-api.us-west-2.amazonaws.com/prod/chat', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            message: message,
+            logs: logs,
+            model: "bedrock",
+            bucket: "lifelog-uci-2"
+        }),
+        signal: AbortSignal.timeout(20000) // 20 second timeout - increased from 15 seconds
+    })
+    .then(response => {
+        console.log('API Response status:', response.status);
+        if (!response.ok) {
+            throw new Error('Network response was not ok: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Remove loading message
+        document.getElementById(loadingMsgId)?.remove();
+        
+        console.log('API Response data:', data);
+        
+        // Check if response contains actual content - check both 'response' and 'message' keys
+        if (data && (data.response || data.message)) {
+            // Display bot response - handle both possible keys
+            appendMessage('bot', data.response || data.message);
+        } else {
+            console.error('Empty data object or missing required fields:', data);
+            throw new Error('Empty or invalid response from server');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        
+        if (retryCount < maxRetries) {
+            // Update loading message
+            const loadingMsg = document.getElementById(loadingMsgId);
+            if (loadingMsg) {
+                loadingMsg.textContent = `Connection issue. Retrying (${retryCount + 1}/${maxRetries})...`;
+            }
+            
+            // Retry with exponential backoff
+            setTimeout(() => {
+                makeApiRequest(message, logs, loadingMsgId, retryCount + 1);
+            }, 1000 * Math.pow(2, retryCount));
+        } else {
+            handleApiError(loadingMsgId);
+        }
+    });
+}    
 };
         </script>
     </body>
