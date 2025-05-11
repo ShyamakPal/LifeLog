@@ -24,31 +24,29 @@ def lambda_handler(event, context):
         model_id = os.environ.get('MODEL_ID')
         logger.info(f"Environment variables: MODEL_ID={model_id or 'NOT_SET'}")
         
-        # Extract body from the event
-        body = event.get('body')
+        # FIXED: Check if event is already the correct format
+        # The event should already contain message, logs, etc. directly
+        # if coming from the fixed proxy
         
-        if not body:
-            error_msg = "No body found in the request"
-            logger.error(error_msg)
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'error': error_msg
-                })
-            }
+        # Extract fields directly from the event
+        user_message = event.get('message')
+        logs = event.get('logs', [])
+        model = event.get('model')
+        bucket = event.get('bucket')
         
-        # Log the body type and content safely
-        logger.info(f"Body type: {type(body).__name__}")
-        if isinstance(body, str):
-            try:
-                logger.info("Parsing string body as JSON")
-                body = json.loads(body)
-            except json.JSONDecodeError as e:
-                error_msg = f"Failed to parse body as JSON: {str(e)}"
+        # Log received data
+        logger.info(f"Direct message field: {user_message is not None}")
+        logger.info(f"Direct logs field: {len(logs)} entries")
+        logger.info(f"Model: {model}")
+        logger.info(f"Bucket: {bucket}")
+        
+        # If direct fields are not found, try to extract from body as fallback
+        # This maintains backward compatibility with the old structure
+        if user_message is None:
+            body = event.get('body')
+            
+            if not body:
+                error_msg = "No message or body found in the request"
                 logger.error(error_msg)
                 return {
                     'statusCode': 400,
@@ -60,11 +58,35 @@ def lambda_handler(event, context):
                         'error': error_msg
                     })
                 }
+            
+            # Parse body if it's a string
+            if isinstance(body, str):
+                try:
+                    logger.info("Parsing string body as JSON")
+                    body = json.loads(body)
+                except json.JSONDecodeError as e:
+                    error_msg = f"Failed to parse body as JSON: {str(e)}"
+                    logger.error(error_msg)
+                    return {
+                        'statusCode': 400,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        },
+                        'body': json.dumps({
+                            'error': error_msg
+                        })
+                    }
+            
+            # Extract from body
+            user_message = body.get('message')
+            logs = body.get('logs', [])
+            model = body.get('model')
+            bucket = body.get('bucket')
         
-        # Extract and validate user message
-        user_message = body.get('message')
+        # Validate user message
         if not user_message:
-            error_msg = "No 'message' field found in request body"
+            error_msg = "No 'message' field found in request"
             logger.error(error_msg)
             return {
                 'statusCode': 400,
@@ -78,9 +100,6 @@ def lambda_handler(event, context):
             }
         
         logger.info(f"User message: {user_message[:100]}..." if len(user_message) > 100 else f"User message: {user_message}")
-        
-        # Extract logs if available
-        logs = body.get('logs', [])
         logger.info(f"Received {len(logs)} log entries")
         
         # Initialize Bedrock Runtime client

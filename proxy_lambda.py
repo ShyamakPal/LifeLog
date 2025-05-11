@@ -75,18 +75,21 @@ def lambda_handler(event, context):
                     logger.info(f"Body contains {len(body['logs'])} logs")
         else:
             logger.warning("No 'body' found in event")
+        
+        # IMPORTANT FIX: Pass the body directly without nesting it
+        # This ensures the processor lambda receives the JSON object directly 
+        # as its event, not nested inside a 'body' key
+        payload = body
             
-        # Prepare the payload for the processor Lambda
-        payload = {
-            'body': body
-        }
-        
-        # Include important headers and request context
-        if 'headers' in event:
-            payload['headers'] = event['headers']
-        
-        if 'requestContext' in event:
-            payload['requestContext'] = event['requestContext']
+        # Include important headers and request context if needed in a way
+        # that doesn't interfere with the main payload
+        if payload and isinstance(payload, dict):
+            # Only add these if they don't conflict with existing keys
+            if 'headers' not in payload and 'headers' in event:
+                payload['_request_headers'] = event['headers']
+            
+            if 'requestContext' not in payload and 'requestContext' in event:
+                payload['_request_context'] = event['requestContext']
         
         logger.info(f"Invoking Lambda function: {processor_lambda_name}")
         
