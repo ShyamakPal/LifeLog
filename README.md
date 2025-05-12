@@ -66,13 +66,17 @@ Detailed AWS setup instructions can be found in the [backend/README.md](backend/
 ```
 LifeLog/
 ├── index.html           # Main application file
-├── styles.css           # Styling for the application
+├── assets/
+│   └── favicon.ico      # Tab icon
+│   └── logo.png         # Website logo
+├── css/
+│   └── styles.css       # Styling for the application
+├── ec2_setup.sh         # File to setup the ec2
+├── template.yaml        # Defines reusable configuration elements
+├── setup.sh             # Script that sets up certain features
 ├── lambda_function.py   # Python code for the Lambda function
 ├── proxy_lambda.py      # Python code for the Lambda function
-├── ec2_setup.sh         # File to setup the ec2
-├── setup.sh             # Script that sets up certain features
-├── template.yaml        # Defines reusable configuration elements
-└── README.md            # This file, includes backend setup in at the bottom
+└── README.md            # This file includes backend setup at the bottom
 ```
 
 ## Team Members
