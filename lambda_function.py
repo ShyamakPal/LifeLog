@@ -1,4 +1,3 @@
-# This is new and a test
 import json
 import os
 import boto3
